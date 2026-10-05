@@ -199,10 +199,24 @@ impl super::Context {
                 )
             }
         } else {
-            (
-                crate::AlphaMode::Ignored,
-                vk::CompositeAlphaFlagsKHR::OPAQUE,
-            )
+            // PATCH (screensight): do not request OPAQUE unless the surface
+            // actually advertises it. V3DV (Raspberry Pi 4) only supports
+            // PRE_MULTIPLIED | INHERIT; requesting an unsupported composite
+            // alpha is undefined and showed up as green garbage.
+            let composite_alpha = if capabilities
+                .supported_composite_alpha
+                .contains(vk::CompositeAlphaFlagsKHR::OPAQUE)
+            {
+                vk::CompositeAlphaFlagsKHR::OPAQUE
+            } else if capabilities
+                .supported_composite_alpha
+                .contains(vk::CompositeAlphaFlagsKHR::INHERIT)
+            {
+                vk::CompositeAlphaFlagsKHR::INHERIT
+            } else {
+                vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+            };
+            (crate::AlphaMode::Ignored, composite_alpha)
         };
 
         let (requested_frame_count, mode_preferences) = match config.display_sync {
@@ -210,6 +224,9 @@ impl super::Context {
             crate::DisplaySync::Recent => (
                 3,
                 [
+                    // PATCH (screensight): prefer FIFO. V3DV advertises MAILBOX
+                    // but presenting with it produced garbage on the Pi.
+                    vk::PresentModeKHR::FIFO,
                     vk::PresentModeKHR::MAILBOX,
                     vk::PresentModeKHR::FIFO_RELAXED,
                     vk::PresentModeKHR::IMMEDIATE,
